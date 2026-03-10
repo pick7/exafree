@@ -46,4 +46,6 @@ COPY . .
 
 EXPOSE 7860
 
+VOLUME ["/app/data"]
+
 CMD ["python", "main.py"]
