@@ -2,9 +2,11 @@ import axios, { type AxiosInstance, type AxiosError } from 'axios'
 import { useAuthStore } from '@/stores/auth'
 import router from '@/router'
 
+const apiBaseUrl = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || ''
+
 // 创建 axios 实例
 export const apiClient: AxiosInstance = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '',
+  baseURL: apiBaseUrl,
   timeout: 30000,
   withCredentials: true, // 支持 cookie 认证
 })

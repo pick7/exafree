@@ -1,3 +1,13 @@
+FROM node:24-alpine AS frontend-builder
+
+WORKDIR /frontend
+
+COPY frontend/package*.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
 FROM python:3.12-slim
 
 ARG APT_MIRROR=http://deb.debian.org
@@ -5,7 +15,9 @@ ARG APT_MIRROR=http://deb.debian.org
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PORT=7860
+    PORT=7860 \
+    CONFIG_FILE=/app/data/settings.yaml \
+    ADMIN_PANEL_STATIC_DIR=/app/static
 
 WORKDIR /app
 
@@ -47,7 +59,10 @@ RUN python -m pip install --upgrade pip \
     && pip install -r requirements.txt \
     && python -m playwright install --with-deps chromium
 
-COPY . .
+COPY main.py ./
+COPY core ./core
+COPY scripts ./scripts
+COPY --from=frontend-builder /frontend/dist ./static
 
 EXPOSE 7860
 

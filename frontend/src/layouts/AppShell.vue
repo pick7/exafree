@@ -394,7 +394,10 @@ const navIconClass = (path: string) => {
 
 
 const apiBaseUrl = computed(() => {
-  const raw = settingsStore.settings?.basic?.base_url || import.meta.env.VITE_API_URL || window.location.origin
+  const raw = settingsStore.settings?.basic?.base_url
+    || import.meta.env.VITE_API_URL
+    || import.meta.env.VITE_API_BASE_URL
+    || window.location.origin
   return raw.replace(/\/$/, '')
 })
 
@@ -460,4 +463,3 @@ async function copyText(value: string) {
 }
 
 </script>
-

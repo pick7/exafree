@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execSync, spawn } from 'child_process';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { createInterface } from 'readline';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -22,6 +22,7 @@ const ok   = msg => console.log(`${C.green}✓ ${msg}${C.reset}`);
 const err  = msg => console.log(`${C.red}✗ ${msg}${C.reset}`);
 const info = msg => console.log(`${C.yellow}→ ${msg}${C.reset}`);
 const step = msg => console.log(`\n${C.blue}${C.bold}[STEP] ${msg}${C.reset}`);
+const REQUIRED_NODE_RANGE = '^20.19.0 || >=22.12.0';
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────
 function run(cmd, opts = {}) {
@@ -40,6 +41,110 @@ function which(bin) {
       return false;
     }
   }
+}
+
+function loadDotEnv() {
+  const envPath = resolve(ROOT, '.env');
+  if (!existsSync(envPath)) return {};
+
+  const content = readFileSync(envPath, 'utf8');
+  return content.split(/\r?\n/).reduce((acc, line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) return acc;
+
+    const idx = trimmed.indexOf('=');
+    if (idx === -1) return acc;
+
+    const key = trimmed.slice(0, idx).trim();
+    let value = trimmed.slice(idx + 1).trim();
+    value = value.replace(/^['"]|['"]$/g, '');
+    acc[key] = value;
+    return acc;
+  }, {});
+}
+
+function parseVersion(raw) {
+  const match = String(raw).trim().replace(/^v/, '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) return null;
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+function compareVersions(a, b) {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  return a.patch - b.patch;
+}
+
+function isSupportedNodeVersion(rawVersion) {
+  const version = parseVersion(rawVersion);
+  if (!version) return false;
+  const min20 = { major: 20, minor: 19, patch: 0 };
+  const min22 = { major: 22, minor: 12, patch: 0 };
+  return (
+    (version.major === 20 && compareVersions(version, min20) >= 0) ||
+    compareVersions(version, min22) >= 0
+  );
+}
+
+const envFile = loadDotEnv();
+
+function envValue(name) {
+  return process.env[name] ?? envFile[name] ?? '';
+}
+
+function adminPanelDisabled() {
+  return envValue('DISABLE_ADMIN_PANEL') === '1';
+}
+
+function frontendDistDir() {
+  return resolve(ROOT, 'frontend', 'dist');
+}
+
+function legacyStaticDir() {
+  return resolve(ROOT, 'static');
+}
+
+function warnLegacyStaticDir() {
+  if (existsSync(legacyStaticDir())) {
+    info('检测到仓库根 legacy static/ 目录；新版源码运行会忽略它，请优先使用 frontend/dist。');
+  }
+}
+
+function ensureNodeToolchain() {
+  if (!isSupportedNodeVersion(process.version)) {
+    err(`当前 Node.js 版本 ${process.version} 不满足要求（需要 ${REQUIRED_NODE_RANGE}）`);
+    console.log('  请升级 Node.js 后再执行前端构建，或改用 Docker 部署。');
+    process.exit(1);
+  }
+
+  if (!which('npm')) {
+    err('未找到 npm，请先安装 Node.js/npm。Docker 部署不需要宿主机安装前端工具链。');
+    process.exit(1);
+  }
+}
+
+function ensureFrontendReadyForServe() {
+  if (adminPanelDisabled()) {
+    info('检测到 DISABLE_ADMIN_PANEL=1，跳过前端构建检查。');
+    return;
+  }
+
+  if (existsSync(frontendDistDir())) {
+    warnLegacyStaticDir();
+    return;
+  }
+
+  warnLegacyStaticDir();
+  err('未找到 frontend/dist，当前源码部署无法提供管理面板。');
+  console.log('  请执行：');
+  console.log('  cd frontend');
+  console.log('  npm ci');
+  console.log('  npm run build');
+  process.exit(1);
 }
 
 // 根据平台返回 venv 内的 python / pip 路径
@@ -98,18 +203,21 @@ function buildFrontend() {
   step('安装并构建前端');
   const frontendDir = resolve(ROOT, 'frontend');
 
+  if (adminPanelDisabled()) {
+    info('检测到 DISABLE_ADMIN_PANEL=1，跳过前端构建。');
+    return;
+  }
+
   if (!existsSync(frontendDir)) {
     err('frontend 目录不存在');
     process.exit(1);
   }
 
-  if (!which('npm')) {
-    err('未找到 npm，请先安装 Node.js');
-    process.exit(1);
-  }
+  ensureNodeToolchain();
+  warnLegacyStaticDir();
 
-  info('npm install ...');
-  run('npm install', { cwd: frontendDir });
+  info('npm ci ...');
+  run('npm ci', { cwd: frontendDir });
 
   info('npm run build ...');
   run('npm run build', { cwd: frontendDir });
@@ -125,6 +233,8 @@ function startServer() {
     err('.venv 不存在，请先执行"初始化环境"');
     process.exit(1);
   }
+
+  ensureFrontendReadyForServe();
 
   info(`使用 ${python} 启动 main.py ...`);
   console.log(`${C.cyan}${'─'.repeat(50)}${C.reset}`);
@@ -156,7 +266,7 @@ ${C.bold}${C.cyan}╔═══════════════════�
   ${C.green}2${C.reset}  初始化环境      （创建 .venv + 安装 Python 依赖 + 构建前端）
   ${C.green}3${C.reset}  仅启动服务      （跳过初始化，直接启动）
   ${C.green}4${C.reset}  重新安装依赖    （重装 Python 依赖 + 重建前端）
-  ${C.green}5${C.reset}  仅重建前端      （npm install + npm run build）
+  ${C.green}5${C.reset}  仅重建前端      （npm ci + npm run build）
   ${C.green}0${C.reset}  退出
 `);
 }
@@ -206,4 +316,3 @@ async function main() {
 }
 
 main().catch(e => { err(e.message); process.exit(1); });
-

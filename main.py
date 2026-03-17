@@ -18,6 +18,7 @@ from core.database import stats_db
 
 # ---------- 数据目录配置 ----------
 DATA_DIR = "./data"
+ROOT_DIR = Path(__file__).resolve().parent
 
 # 确保数据目录存在
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -613,6 +614,52 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"[SYSTEM] 关闭时保存冷却状态失败: {e}")
 
+
+def _validate_admin_panel_static_dir(candidate: Path, source: str) -> Path:
+    candidate = candidate.expanduser().resolve()
+    if not candidate.is_dir():
+        raise RuntimeError(f"[ADMIN] 配置的前端静态目录不存在: {candidate}")
+    index_path = candidate / "index.html"
+    if not index_path.is_file():
+        raise RuntimeError(f"[ADMIN] 前端静态目录缺少 index.html: {candidate}")
+    logger.info("[ADMIN] 管理面板静态目录: %s (%s)", candidate, source)
+    return candidate
+
+
+def _resolve_admin_panel_static_dir() -> Path:
+    explicit_dir = os.getenv("ADMIN_PANEL_STATIC_DIR", "").strip()
+    if explicit_dir:
+        candidate = Path(explicit_dir)
+        if not candidate.is_absolute():
+            candidate = ROOT_DIR / candidate
+        return _validate_admin_panel_static_dir(candidate, "ADMIN_PANEL_STATIC_DIR")
+
+    frontend_dir = ROOT_DIR / "frontend"
+    frontend_dist_dir = frontend_dir / "dist"
+    runtime_static_dir = ROOT_DIR / "static"
+
+    if frontend_dir.is_dir():
+        if frontend_dist_dir.is_dir():
+            if runtime_static_dir.is_dir():
+                logger.warning(
+                    "[ADMIN] 检测到仓库根 legacy static/ 目录，源码运行时将忽略它并优先使用 %s",
+                    frontend_dist_dir,
+                )
+            return _validate_admin_panel_static_dir(frontend_dist_dir, "frontend/dist")
+
+        legacy_hint = ""
+        if runtime_static_dir.is_dir():
+            legacy_hint = " 检测到仓库根 legacy static/ 目录；新版不会在源码仓内回退到该目录，请手动清理旧产物。"
+        raise RuntimeError(
+            "[ADMIN] 管理面板静态资源未找到。请先执行: cd frontend && npm ci && npm run build。"
+            + legacy_hint
+        )
+
+    if runtime_static_dir.is_dir():
+        return _validate_admin_panel_static_dir(runtime_static_dir, "runtime static")
+
+    raise RuntimeError("[ADMIN] 管理面板静态资源未找到。请设置 ADMIN_PANEL_STATIC_DIR 或重新构建镜像。")
+
 app = FastAPI(title="ExaFree", lifespan=lifespan)
 
 frontend_origin = os.getenv("FRONTEND_ORIGIN", "").strip()
@@ -635,12 +682,16 @@ elif frontend_origin:
         allow_headers=["*"],
     )
 
+ADMIN_PANEL_STATIC_DIR: Optional[Path] = None
 if not DISABLE_ADMIN_PANEL:
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-    if os.path.exists(os.path.join("static", "assets")):
-        app.mount("/assets", StaticFiles(directory=os.path.join("static", "assets")), name="assets")
-    if os.path.exists(os.path.join("static", "vendor")):
-        app.mount("/vendor", StaticFiles(directory=os.path.join("static", "vendor")), name="vendor")
+    ADMIN_PANEL_STATIC_DIR = _resolve_admin_panel_static_dir()
+    app.mount("/static", StaticFiles(directory=str(ADMIN_PANEL_STATIC_DIR)), name="static")
+    assets_dir = ADMIN_PANEL_STATIC_DIR / "assets"
+    vendor_dir = ADMIN_PANEL_STATIC_DIR / "vendor"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+    if vendor_dir.is_dir():
+        app.mount("/vendor", StaticFiles(directory=str(vendor_dir)), name="vendor")
 try:
     from core.mcp_server import get_mcp_http_app
 
@@ -656,16 +707,16 @@ async def mcp_redirect():
 if not DISABLE_ADMIN_PANEL:
     @app.get("/")
     async def serve_frontend_index():
-        index_path = os.path.join("static", "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
+        index_path = ADMIN_PANEL_STATIC_DIR / "index.html"
+        if index_path.is_file():
+            return FileResponse(str(index_path))
         raise HTTPException(404, "Not Found")
 
     @app.get("/logo.svg")
     async def serve_logo():
-        logo_path = os.path.join("static", "logo.svg")
-        if os.path.exists(logo_path):
-            return FileResponse(logo_path)
+        logo_path = ADMIN_PANEL_STATIC_DIR / "logo.svg"
+        if logo_path.is_file():
+            return FileResponse(str(logo_path))
         raise HTTPException(404, "Not Found")
 
 @app.get("/health")
@@ -3048,9 +3099,9 @@ if not DISABLE_ADMIN_PANEL:
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         """处理所有前端路由，返回 index.html"""
-        index_path = os.path.join("static", "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path)
+        index_path = ADMIN_PANEL_STATIC_DIR / "index.html"
+        if index_path.is_file():
+            return FileResponse(str(index_path))
         raise HTTPException(404, "Not Found")
 
 

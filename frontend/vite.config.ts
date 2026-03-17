@@ -11,8 +11,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(__dirname, '../static'),
-    emptyOutDir: false,
+    outDir: path.resolve(__dirname, './dist'),
   },
   server: {
     port: 5173,

@@ -13,15 +13,17 @@ Modern admin panel built with Vue 3 + TypeScript + Tailwind CSS.
 
 ## Development
 
+Node.js requirement: `^20.19.0 || >=22.12.0`
+
 ```bash
 # Install dependencies
-npm install
+npm ci
 
 # Start dev server
 npm run dev
 ```
 
-Visit: http://localhost:5174
+Visit: http://localhost:5173
 
 ## Build
 
@@ -52,15 +54,19 @@ src/
 Create `.env.local`:
 
 ```bash
-VITE_API_BASE_URL=http://localhost:7860
+VITE_API_URL=http://localhost:7860
 ```
+
+Legacy compatibility:
+
+- `VITE_API_BASE_URL` is still accepted, but `VITE_API_URL` is the canonical name.
 
 ## Docker Build
 
 The root `Dockerfile` automatically builds the frontend:
 
 ```dockerfile
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 WORKDIR /frontend
 COPY frontend/package*.json ./
 RUN npm ci
@@ -68,4 +74,5 @@ COPY frontend/ ./
 RUN npm run build
 ```
 
-Build artifacts are copied to `static/` directory.
+Local source builds write to `frontend/dist/`.
+The runtime image serves those assets from `/app/static`.

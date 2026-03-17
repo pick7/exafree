@@ -38,6 +38,7 @@ docker run --rm -p 7860:7860 -v ./data:/app/data ghcr.io/chengtx809/exafree:main
 ```
 
 镜像支持 `linux/amd64` 与 `linux/arm64`。
+Docker 镜像会在构建阶段自动生成管理面板前端资源，因此宿主机不需要额外安装 Node.js / npm。
 
 访问：
 
@@ -224,13 +225,20 @@ claude mcp add --transport http exa-pool http://localhost:7860/mcp
 
 ## 本地开发（非 Docker）
 
+说明：
+
+- 启用管理面板时，需要 Node.js `^20.19.0 || >=22.12.0`
+- 本地前端构建产物输出到 `frontend/dist`
+- 若设置 `DISABLE_ADMIN_PANEL=1` 仅运行 API，可跳过前端构建
+
 ```bash
 git clone https://github.com/chengtx809/exafree.git
 cd exafree
+cp .env.example .env
 
 # 前端
 cd frontend
-npm install
+npm ci
 npm run build
 cd ..
 
@@ -240,6 +248,8 @@ python -m venv .venv
 pip install -r requirements.txt
 python main.py
 ```
+
+如升级到新版后仓库根目录仍残留旧版 `static/`，那是历史构建产物，可在确认无用后手动删除；源码运行将不再读取该目录。
 
 ---
 

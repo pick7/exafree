@@ -40,6 +40,27 @@ jobs:
             type=ref,event=branch
             type=sha
 
+      - name: Build smoke-test image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: exafree-smoke:latest
+
+      - name: Smoke-test container
+        run: |
+          docker run -d --rm --name exafree-smoke -p 7860:7860 exafree-smoke:latest
+          trap 'docker logs exafree-smoke || true; docker stop exafree-smoke || true' EXIT
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:7860/health > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:7860/health
+          curl -fsS http://127.0.0.1:7860/ > /dev/null
+
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
