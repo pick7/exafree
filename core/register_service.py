@@ -57,6 +57,15 @@ class RegisterService(BaseTaskService[RegisterTask]):
             log_prefix="REGISTER",
         )
 
+    @staticmethod
+    def _cleanup_mail(client, log_cb) -> None:
+        """注册完成后清理临时邮箱（仅 Moemail 支持）"""
+        if hasattr(client, "delete_email"):
+            try:
+                client.delete_email()
+            except Exception as e:
+                log_cb("warning", f"⚠️ 清理邮箱失败: {e}")
+
     def _get_running_task(self) -> Optional[RegisterTask]:
         for task in self._tasks.values():
             if isinstance(task, RegisterTask) and task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
@@ -162,8 +171,10 @@ class RegisterService(BaseTaskService[RegisterTask]):
         client = create_temp_mail_client(provider, domain=domain, log_cb=log_cb)
 
         if not client.register_account(domain=domain):
+            self._cleanup_mail(client, log_cb)
             return {"success": False, "error": f"{provider} 注册失败"}
         if not getattr(client, "email", None):
+            self._cleanup_mail(client, log_cb)
             return {"success": False, "error": f"{provider} 邮箱地址未生成"}
         log_cb("info", f"✅ 邮箱创建成功: {client.email}")
 
@@ -202,6 +213,7 @@ class RegisterService(BaseTaskService[RegisterTask]):
             time.sleep(EMAIL_LOGIN_RETRY_SLEEP_SECONDS)
 
         if not result or not result.get("success"):
+            self._cleanup_mail(client, log_cb)
             return {
                 "success": False,
                 "error": (result or {}).get("error", "Exa 自动化流程失败"),
@@ -256,4 +268,5 @@ class RegisterService(BaseTaskService[RegisterTask]):
         self._apply_accounts_update(accounts_data)
         masked_key = (config_data.get("exa_api_key", "") or "")[:8]
         log_cb("info", f"✅ 已保存 Exa key 前缀: {masked_key}...")
+        self._cleanup_mail(client, log_cb)
         return {"success": True, "email": client.email, "config": config_data}
